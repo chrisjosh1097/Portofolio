@@ -1,0 +1,1007 @@
+---
+title: "<span style=\"color:#dc4c14\">Draft - Final Report</span>"
+author: "Group 14"
+date: "2024-05-16"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    theme: united
+    highlight: kate
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(MASS)
+library(tidyverse)
+library(caret)
+# For Data Vizualization
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(naniar)
+library(nnet)
+library(caret)
+library(dplyr)
+library(randomForest)
+library(ranger)
+library(kableExtra)
+library(xgboost)
+library(knitr)
+library(DiagrammeR)
+```
+
+# 1. Overview
+INGAT UNTUK HAPUS INI: 3pts Clear description of the problem and a succinct description of the IDA process.
+
+## 1.1. Description of the Problem
+Accurate risk assessment and mitigation strategies are crucial for loan provision, making it a complex and time-consuming process for banking institutions (Alagic et al., 2024). For lenders, credit risk analysis is essential as it concerns the borrower's ability to repay the loan, which is the core of credit scoring (Moscato et al., 2021).
+
+In this project, our group took a dataset containing information on customers who took out loans and used it to classify whether the customer has a <span style="color:#dc4c14">**good, standard, or poor credit score.**</span> This classification will be determined from several features, such as how the customer pays each month, monthly income, payment behaviour, credit utilisation ratio, etc. The goal is to help banks add additional assessment on loan eligibility and reduce financial risks.
+
+## 1.2 Dataset Description
+This dataset contains information 100,000 bank customers across 28 features (12 categorical and 16 numerical). It includes details on income, accounts, loans, credit history, and payment behavior. The goal is to use this data for credit score analysis, specifically to classify customers into good, standard, or poor credit categories.
+
+## 1.3. Initial Data Analysis
+
+An initial data analysis is concluded to identify the data patterns, attributes, and other characteristics to reduce assumptions about the data.There are some key findings found.
+
+First, it is found that the <span style="color:#dc4c14">**dataset is imbalaced**</span> toward the Standard Class, with a <span style="color:#dc4c14">**ratio**</span> of the classes (Good: Poor: Standard) being <span style="color:#dc4c14">**18 :29 :53**.</span> The ratio and count of each of the classes can be seen in the figure below.
+
+```{r, warning=FALSE, message=FALSE}
+# Read 
+df <- read.csv("cleaned-train.csv") %>% dplyr::select(-X)
+```
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+colors <- c("Good" = "#60FF60",
+            "Standard" = "#6060FF",
+            "Poor" = "#FF6060")
+
+dftab <- df %>% 
+  count(Credit_Score) %>% 
+  mutate(perc = round(100*n/sum(n), 2))
+
+ggplot(dftab, aes(x=Credit_Score, y=n, fill = Credit_Score)) +
+  ylim(0,60000) +
+  geom_bar(stat="identity", show.legend = FALSE) +
+  geom_text(aes(label = paste0(perc, "%")),
+            position = position_dodge(.9), 
+            vjust = -0.5, 
+            colour = "black", fontface='bold'
+  ) +
+  scale_fill_manual("legend", values =colors) +
+  ylab("Count") +
+  xlab("Credit Score") +
+  ggtitle("Count of Target Variable")
+  # theme_minimal(base_size = 1)
+```
+
+Another observation made is about the behavior of each class for the Interest Rate and Number of Loan. It is found that based on the box plots:
+
+1. **"Good" credit scores** tend to have **lower interest rates** and **fewer loans**
+
+2. **Higher history age** tend to have **Good Credit Score**
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+p1 <- ggplot(df[order(df$Credit_Score),], aes(y = Interest_Rate, x = Credit_Score, color = Credit_Score, fill = Credit_Score)) +
+  geom_boxplot(outliers = FALSE) +
+  stat_boxplot(geom = "errorbar", width = 0.25) + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) + 
+  labs(title = "Interest Rate by Credit Score", x = "Credit Score", y = "Interest Rate") +
+  theme_minimal()
+p2 <- ggplot(df[order(df$Credit_Score),], aes(y = Num_of_Loan, x = Credit_Score, color = Credit_Score, fill = Credit_Score)) +
+  geom_boxplot(outliers = FALSE) +
+  stat_boxplot(geom = "errorbar", width = 0.25) + 
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) + 
+  labs(title = "Number of Loan by Credit Score", x = "Credit Score", y = "Number of Loan") +
+  theme_minimal()
+
+p12 <- ggarrange(p1, p2, common.legend = TRUE)
+p12
+```
+
+A t-SNE plot is also createdl. Although the t-SNE visualization didn't show clear clusters, the dataset remains valuable for machine learning classification. Further exploration, feature engineering, and alternative algorithms can unlock hidden patterns and enable accurate predictive models.
+
+
+```{r}
+# library(Rtsne)
+#
+# It Require 1 Hour to run this R-TSNE 
+#
+# data <- df %>%
+#           na.exclude %>% 
+#           dplyr::select(-c("Customer_ID", "ID", "Name", "SSN")) %>% 
+#           select_if(is.numeric)
+
+# p = 500
+# tsne_out <- Rtsne(as.matrix(data), perplexity=p)
+# print(paste0("Perplexity :", p))
+# 
+# tsne_plot <- data.frame(x = tsne_out$Y[,1], 
+#                       y = tsne_out$Y[,2],
+#                       Credit_Score = as.factor(df$Credit_Score))
+# 
+# colors <- c("Good" = "#60FF60",
+#             "Standard" = "#6060FF",
+#             "Poor" = "#FF6060")
+# alpha <- c("Good" = 1,
+#             "Standard" = 1,
+#             "Poor" = 1)
+# ggplot(tsne_plot,label=Credit_Score, aes(x=x,y=y, colour = Credit_Score, alpha= Credit_Score)) + 
+#   geom_point(alpha=0.7) + 
+#   scale_color_manual(values=colors) +
+#   scale_alpha_manual(values=alpha) +
+#   ggtitle(paste0("TSNE plot perplexity: ", p)) +
+#   xlab("dim1") +
+#   ylab("dim2")
+```
+
+![T-SNE](./tsne.jpeg)
+
+
+
+# 2. Data preprocessing
+After the Initial Data Analysis, we performed a data preprocessing to make our data compatible with the predictive models.
+
+INGAT UNTUK HAPUS INI: 4pts Performed certain data preprocessing to facilitate training, possibly including handling missing data and imbalanced data, appropriate feature engineering, and/or dimensional reduction.
+
+## 2.1. Dataset Cleaning and Imputation
+Initial data exploration revealed data quality issues that requires cleaning. Inconsistent data, typos, and garbage entries were replaced with null values. The specific cleaning methods employed are detailed in the table below:
+
+```{r table2, echo=FALSE, message=FALSE, warnings=FALSE, results='asis'}
+tabl <- "
+| Messy Data                                    | Cleaning Method                                            | 
+|-----------------------------------------------|------------------------------------------------------------|
+| Underscore after a numerical value. e.g., 31_ | Regex pattern check                                        |
+| Garbage entry. e.g.,!@9#%8 and #F%$D@*&8      | Replace with NA value                                      |
+| Underscore only entry. e.g., _ and _____      | Remove the underscore string, fetching the numerical value |
+| Non-logical value. e.g., Age of 995           | Logical check                                              |
+| NA string value entry. e.g., NA               | Replace NA string with NA value                            |
+"
+cat(tabl) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Read 
+df.initial <- read.csv("initial-cleaned-train.csv") %>% select(-X)
+gg_miss_fct(x = df.initial, fct = Credit_Score) + 
+  labs(title = "NA in Credit Score After Initial Cleaning")
+
+remove(df.initial)
+```
+
+After the initial cleaning, it was discovered that some columns contains up to 20% missing entries. 
+Those missing values were then imputed using the methods listed below:
+
+1. **Num_of_Loan**: Sum of count in Type_of_Loan
+
+2. **Payment_Behaviour, Name, Occupation, and SSN**: Mode imputation per customer ID
+
+3. **Monthly_Inhand_Salary, Interest_Rate, Changed_Credit_Limit, and Num_Credit_Inquiries**: Median imputation per customer ID
+
+4. **Credit_History_Age**: Convert string (e.g., '22 Years and 5 Months') into a numerical count of month (e.g., 269)
+
+5. **Num_of_Delayed_Payment and Amount_invested_monthly**: Zero value imputation
+
+## 2.2. Feature engineering
+
+**Split Payment_Behaviour**
+
+For the Payment_Behavior column, the values consist of a string description combined for the type of Spending and Value of each payments. Using the pattern of the description, we split the string resulting into 2 separate columns of categorical value for the type of Spending and also type of Payment Value.
+
+```{r, warning=FALSE, message=FALSE}
+step_split_payment_behaviour_column <- function(data) {
+  # Split Payment_Behaviour into two new columns: Spent and Value_payment
+  data$PB_Spent <- gsub("_(spent_).*", "", data$Payment_Behaviour)
+  data$PB_Value_payment <- gsub(".*(Small|Medium|Large)_value_payments", "\\1", data$Payment_Behaviour)
+  data <- data %>% dplyr::select(-"Payment_Behaviour")
+  return(data)
+}
+```
+
+**Factor with defined levels**
+
+For this columns we use ordinal encoding to preserve the order of the categories such as, "Small" < "Medium" < "Large". 
+
+```{r, warning=FALSE, message=FALSE}
+step_factor_with_order <- function(data) {
+  data$PB_Spent <- factor(data$PB_Spent, levels = c("Low", "High"))
+  data$PB_Value_payment <- factor(data$PB_Value_payment, levels = c("Small", "Medium", "Large"))
+  data$Credit_Mix <- factor(data$Credit_Mix, levels = c("Bad", "Standard", "Good"))
+  data$Credit_Score <- factor(data$Credit_Score, levels = c("Poor", "Standard", "Good"))
+  return (data)
+}
+```
+
+**Step encode Month**
+
+For the Month columns, since it is a time series value, we did a cyclical encoding of the column using both Sine and Cosine value of the numerical value of the Month. 
+
+```{r, warning=FALSE, message=FALSE}
+step_encode_month <- function(data) {
+  months <- c('January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December')
+  
+  # Dictionary to map month names to integers
+  month_map <- setNames(0:11, months)
+  
+  # Create a temporary data frame to hold the encoded values
+  temp <- data.frame(Month = data$Month)
+  
+  # Convert month names to integers
+  temp$month_num <- sapply(data$Month, function(x) month_map[x])
+  
+  # Apply cyclical encoding using only the cosine function
+  temp$month_cos <- cos(2 * pi * temp$month_num / 12)
+  temp$month_sin <- sin(2 * pi * temp$month_num / 12)
+  
+  data$month_cos <- temp$month_cos
+  data$month_sin <- temp$month_sin
+  
+  data <- data %>% select(-Month)
+  
+  return (data)
+}
+```
+
+**One hot encode** 
+
+A one hot encoding is implemented for the rest of categorical columns that does not have a natural ordering between them. This numeric representation is needed for the models to take the features as an input.
+```{r, warning=FALSE, message=FALSE}
+step_one_hot_encode <- function(data, encoders) {
+  df_onehot <- predict(encoders, newdata = data)
+  # Remove the original columns and integrate the one-hot encoded columns back into the dataset
+  data <- data %>% 
+    select(-Payment_of_Min_Amount, -Occupation) 
+  return (cbind(data, df_onehot))
+}
+
+```
+
+## 2.3. Preprocess the data
+
+**Dropping Irrelevant User Information Columns**
+
+There are some columns that does not have useful information such as the user identifier information (e.g, Customer ID), this kind of columns / features are dropped from the dataset.
+```{r, warning=FALSE, message=FALSE}
+step_drop_irrelevant_columns <- function(data) {
+  data <- data %>% select(-c("Customer_ID", "ID", "Name", "SSN"))
+  return(data)
+}
+```
+
+To implement the whole pre-processing pipeline. First, the data is split into a train and testing set with a percentage of 80% training and 20% testing. Each of the train and test set then is inputted to the whole feature engineering functions explained above using the Pipe operator.
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+# split data
+set.seed(5003) 
+train_index <- createDataPartition(df$Credit_Score, p = 0.8, list = FALSE)
+train_df <- df[train_index, ]
+test_df <- df[-train_index, ]
+
+# only fitted into the train data
+encoders <- dummyVars(~ Payment_of_Min_Amount + Occupation, data = train_df)
+
+train_data <- train_df %>%
+  step_drop_irrelevant_columns %>%
+  step_split_payment_behaviour_column %>%
+  step_factor_with_order %>%
+  step_encode_month %>%
+  step_one_hot_encode(encoder = encoders)
+
+test_data <- test_df %>%
+  step_drop_irrelevant_columns %>%
+  step_split_payment_behaviour_column %>%
+  step_factor_with_order %>%
+  step_encode_month %>%
+  step_one_hot_encode(encoder = encoders)
+```
+
+**PCA**
+
+An initial run of the models resulted in many memory exhaustion, some probable cause is because the data is very large. To tackle this challenge, a PCA transformation is implemented. A minimum threshold of 85% variance explained is chosen to preserve most of the dataset information, this resulted in 35 of Principle Components. A downside is introduced is that the data become less interpretable since the columns now has transformed from features into Principle Components.
+```{r, warning=FALSE, message=FALSE}
+X_test <- test_data %>% select(-Credit_Score)  %>% data.matrix()
+X_train <- train_data %>% select(-Credit_Score) %>% data.matrix()
+
+# Perform PCA to the train data
+pca_train_result <- prcomp(X_train, scale = TRUE, center = TRUE)
+
+# Calculate explained variance
+explained_var <- pca_train_result$sdev^2 / sum(pca_train_result$sdev^2)
+cumulative_var <- cumsum(explained_var)
+
+# Determine the number of components that explain at least 85% of the variance
+n_components <- which(cumulative_var >= 0.85)[1]
+
+# Print the number of components
+cat("Number of components explaining at least 85% of variance:", n_components, "\n")
+
+df_cumulative_var <- data.frame(PC = 1:length(cumulative_var), CumulativeVariance = cumulative_var)
+ggplot(df_cumulative_var, aes(x = PC, y = CumulativeVariance)) +
+  geom_line() + geom_point() +
+  geom_vline(xintercept = n_components, linetype="dotted", color="red") +
+  annotate("text", x = n_components, y = max(df_cumulative_var$CumulativeVariance), label = paste("PCA Components =", n_components), hjust = 1.1, vjust = 1.5, color = "blue") +
+  theme_minimal() +
+  ggtitle("Cumulative Variance Explained") +
+  xlab("Principal Component") +
+  ylab("Cumulative Proportion of Variance Explained")
+```
+
+ Prepare PCA features for the regression model
+```{r, warning=FALSE, message=FALSE}
+pca_features <- pca_train_result$x[, 1:n_components]
+data_train_pca <- as.data.frame(pca_features)
+data_train_pca$Credit_Score <- as.numeric(train_data$Credit_Score)  # Add the target variable back
+data_test_pca <- predict(pca_train_result, X_test)[, 1:n_components]
+```
+
+
+# 3. Classification methods
+INGAT UNTUK HAPUS INI: 4pts Clear description of the methods including: (i) Tried at least 4 classification algorithms. (ii) For classification algorithms requiring parameters, performed parameter tuning.
+
+The metrics chosen to evaluate the models is Accuracy and F1-Score Weighted. Accuracy is chosen to evaluate the overall performance of the model in making predictions. Another metric chosen is F1-Score weighted; this is chosen to evaluate the model’s performance in each of the target classes. The weighted version is chosen since we have a data imbalance explained above.
+```{r, warning=FALSE, message=FALSE}
+calculate_classification_metrics <- function(predictions, actuals, verbose=FALSE) {
+  # Create confusion matrix
+  conf_matrix <- confusionMatrix(factor(predictions), factor(actuals))
+  if (verbose) {
+    print(conf_matrix)
+  }
+  
+  # from the caret confusion Matrix
+  accuracy <- conf_matrix$overall['Accuracy'] 
+  
+  # Extract the confusion matrix table for calculations
+  conf_matrix <- as.matrix(conf_matrix$table)
+  
+  # Computing precision and recall for each class
+  precision <- diag(conf_matrix) / rowSums(conf_matrix)
+  recall <- diag(conf_matrix) / colSums(conf_matrix)
+  
+  # Compute F1 score for each class
+  f1_score <- 2 * precision * recall / (precision + recall)
+  
+  # Handle potential NaN values in precision and recall (due to division by zero)
+  precision[is.nan(precision)] <- 0
+  recall[is.nan(recall)] <- 0
+  
+  # Computing inverse class frequencies as weights
+  class_weights <- colSums(conf_matrix)
+  
+  # Weighted average of F1 scores
+  weighted_f1_score <- sum(f1_score * class_weights, na.rm = TRUE) / sum(class_weights, na.rm = TRUE)
+  
+  # Displaying results
+  if (verbose) {
+    cat("Class-wise Precision:\n")
+    print(precision)
+    cat("Class-wise Recall:\n")
+    print(recall)
+    cat("Class-wise F1 Score:\n")
+    print(f1_score)
+    cat("Weighted F1 Score:\n")
+    print(weighted_f1_score)
+  }
+  return (c(weighted_f1_score, accuracy))
+}
+```
+
+## 3.1 Multinom 
+
+**Baseline**
+
+The first model in the multinomial log linear model, the hyperparameter is the decay which is the weight decay value that will applies a penalty to the coefficient to regularize the model. A base model is created using the default decay of 0. 
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+# Fit the multinomial logistic regression model
+multinom_model <- multinom(Credit_Score ~ ., data = data_train_pca, decay = 0, trace = FALSE)
+
+# Predict and evaluate the model on the test data
+predictions_multinom <- predict(multinom_model, newdata = data_test_pca)
+metrics_multinom <- calculate_classification_metrics(predictions_multinom, as.numeric(as.factor(test_data$Credit_Score)))
+
+df_metrics_multinom <- data.frame(
+  Model = c("Base"),
+  Accuracy = c(metrics_multinom[2]),
+  F1Score = (metrics_multinom[1]),
+  row.names = NULL
+)
+```
+
+Metrics result of the base multinomial log linear model can be seen in the table below:
+
+```{r}
+kable(df_metrics_multinom, caption = "Base Multinomial Log Linear Model Result") %>%
+  column_spec(1, width = "20%") %>%
+  column_spec(2, width = "20%") %>% 
+  column_spec(3, width = "20%")
+```
+
+
+**Tuned**
+
+To tune the model, we variate the decay value using the following search space {0, 0.01, 0.1, 1, 10}. A k fold validation is also implemented with the number of 5 folds.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+set.seed(5003)
+num_folds <- 5
+data_train_pca$Credit_Score <- as.factor(data_train_pca$Credit_Score)
+folds <- createFolds(data_train_pca$Credit_Score, k = num_folds)
+
+decay_values <- c(0, 0.01, 0.1, 1, 10)
+results <- data.frame(Decay = numeric(),
+                      F1_Score = numeric(),
+                      Accuracy = numeric())
+
+for(decay in decay_values) {
+  fold_f1_scores <- c()
+  fold_acc_scores <- c()
+  
+  for(i in 1:num_folds) {
+    test_indices <- folds[[i]]
+    train_data_fold <- data_train_pca[-test_indices,]
+    test_data_fold <- data_train_pca[test_indices,]
+    
+    multinom_model <- multinom(Credit_Score ~ ., data = train_data_fold, decay = decay, trace = FALSE)
+  
+    predictions <- predict(multinom_model, newdata = test_data_fold)
+    
+    predictions <- factor(predictions, levels = levels(test_data_fold$Credit_Score))
+    
+    conf_matrix <- confusionMatrix(predictions, test_data_fold$Credit_Score)
+    precision <- conf_matrix$byClass[, "Precision"]
+    recall <- conf_matrix$byClass[, "Recall"]
+    f1 <- 2 * (precision * recall) / (precision + recall)
+    
+    conf_matrix_as_matrix <- as.matrix(conf_matrix$table)
+    class_weights <- colSums(conf_matrix_as_matrix)
+    
+    # mean_f1 <- mean(f1, na.rm = TRUE)
+    mean_f1 <- sum(f1 * class_weights, na.rm = TRUE) / sum(class_weights, na.rm = TRUE)
+    
+    accuracy <- conf_matrix$overall["Accuracy"]
+    
+    fold_acc_scores <- c(fold_acc_scores, accuracy)
+    fold_f1_scores <- c(fold_f1_scores, mean_f1)
+  }
+  
+  mean_f1_score <- mean(fold_f1_scores, na.rm = TRUE)
+  mean_accuracy <- mean(fold_acc_scores, na.rm = TRUE)
+  
+  results <- rbind(results, data.frame(Decay = decay,
+                                       F1_Score = mean_f1_score,
+                                       Accuracy = mean_accuracy))
+}
+
+
+```
+
+
+Metrics of the hyperparameter tuning compiled results can be seen in the table below:
+
+```{r}
+kable(results, caption = "Multinomial Log Linear Model Hyperparameter Tuning Result") %>%
+  column_spec(1, width = "20%") %>%
+  column_spec(2, width = "20%") %>%
+  column_spec(3, width = "20%")
+```
+
+
+**Best**
+
+From the result, we can see that the best accuracy achieved by the decay value of 0.1. But if we compare this to the base model, we can see that the metrics stays the same. This is mainly because multinom use an iterative process to minimize the cost function, and we can see that even without a decay value and also a decay value of 0.1, the model manages to minimize the cost function without overshooting the value, which is typically what a decay value was mean to solve 
+
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+# Fit the multinomial logistic regression model
+multinom_model <- multinom(Credit_Score ~ ., data = data_train_pca, decay = 0.1, trace = FALSE)
+
+# Predict and evaluate the model on the test data
+predictions_tuned_multinom <- predict(multinom_model, newdata = data_test_pca)
+metrics_multinom_tuned <- calculate_classification_metrics(predictions_tuned_multinom, as.numeric(as.factor(test_data$Credit_Score)))
+
+predicted_multinom_labels<-factor(predictions_tuned_multinom, levels = c(1, 2, 3), labels = c("Poor", "Standard", "Good"))
+conf_matrix_multi <- confusionMatrix(predicted_multinom_labels, as.factor(test_data$Credit_Score))
+conf_df_multi <- as.data.frame(as.table(conf_matrix$table))
+names(conf_df_multi) <- c("Actual", "Predicted", "Count")
+
+# Plot heatmap using ggplot2
+ggplot(conf_df_multi, aes(x = Actual, y = Predicted, fill = Count)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Count)) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  labs(x = "Actual", y = "Predicted", title = "Confusion Matrix - Best Multinom Model") +
+  theme(legend.position = "bottom")
+
+df_tuned_multinom <- rbind(df_metrics_multinom, c("Tuned", metrics_multinom_tuned[2], metrics_multinom_tuned[1]))
+kable(df_tuned_multinom, caption = "Multinomial Log Linear Best Model vs Base Model Result") %>%
+  column_spec(1, width = "20%") %>%
+  column_spec(2, width = "20%") %>%
+  column_spec(3, width = "20%")
+
+```
+
+
+## 3.2 LDA
+
+Linear Discrimant(LDA) Analysis is A dimensionality reduction technique commonly used for supervised classification problems. LDA has a goal to project the dataset onto a lower-dimensional space while maximizing the class separability​
+
+**Baseline**
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+set.seed(5003)
+train_control_lda <- trainControl(method = "cv", number = 5)
+# Train the LDA model using 5-fold cross-validation
+cv_model_lda <- train(factor(Credit_Score) ~ ., 
+                  data = data_train_pca, 
+                  method = "lda", 
+                  trControl = train_control_lda)
+
+lda_predictions <- predict(cv_model_lda, newdata = data.frame(data_test_pca))
+predictions_lda <- lda_predictions
+metrics_lda <- calculate_classification_metrics(predictions_lda, as.numeric(test_data$Credit_Score))
+
+df_metrics_lda <- data.frame(
+  Metric = c("Accuracy", "F1 Score"),
+  Value = c(metrics_lda[2], metrics_lda[1]),
+  row.names = NULL  # This will remove the first column (row names)
+)
+kable(df_metrics_lda, caption = "LDA Classification Metrics")
+
+lda_values <- predict(cv_model_lda$finalModel, newdata = data.frame(data_test_pca))
+predicted_lda_labels<-factor(predictions_lda, levels = c(1, 2, 3), labels = c("Poor", "Standard", "Good"))
+lda_data_test <- data.frame(lda_values$x, Predicted_Credit_Score = predicted_lda_labels)
+# Scatter plot of the first two discriminant functions
+p1_lda <- ggplot(lda_data_test, aes(x = LD1, y = LD2, color = Predicted_Credit_Score)) +
+  geom_point(size = 2) +
+  labs(title = "LDA: Linear Discriminant Functions Predictions",
+       x = "Discriminant Function 1",
+       y = "Discriminant Function 2") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Calculate the confusion matrix
+conf_matrix <- confusionMatrix(predicted_lda_labels, as.factor(test_data$Credit_Score))
+
+# Convert the confusion matrix to a data frame
+conf_df <- as.data.frame(as.table(conf_matrix$table))
+names(conf_df) <- c("Actual", "Predicted", "Count")
+
+# Plot heatmap using ggplot2
+p2_lda <- ggplot(conf_df, aes(x = Actual, y = Predicted, fill = Count)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Count)) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  labs(x = "Actual", y = "Predicted", title = "Confusion Matrix - LDA Model") +
+  theme(legend.position = "bottom")
+
+# Arrange the plots side by side
+grid.arrange(p1_lda, p2_lda, ncol = 2)
+```
+
+The plot shows how a Linear Discriminant Analysis (LDA) model performed on test data, emphasizing how credit score categories ("Poor," "Standard," and "Good") were distributed and classified. The scatter plot, which shows "Poor" scores clustering in the top left, "Standard" scores in the center, and "Good" scores on the right, clearly separates these categories along the first two discriminant functions. The confusion matrix is represented by the adjacent heatmap, which displays the proportion of accurate and inaccurate predictions for each class. While a significant portion of the cases were accurately classified by the model, there were several notable misclassifications, particularly in the "Standard" and "Poor" categories. With a weighted F1 score of 57.68% and an accuracy of 56.56% overall, the LDA model performed moderately.Since LDA does not have tuning parameters, I performed 5-fold cross-validation to ensure the accuracy values are reliable and validated.
+
+## 3.3 Random Forest
+
+**Baseline**
+
+Initial random forest model is trained using whole train_data, some parameters will be tuned later and now it leaved as default except for the importance, impurity is used so the features importance are calculated. The parameters are:
+
+1. num.trees : number of trees that will be grown on the random forest, default is 500
+
+2. max.depth : maximum of depth/ level for each trees, default is NULL or 0 where the trees are let fully grown until pure
+
+3. min.node.size : minimum number of samples on the leaf node, default is 1 for classification.
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+# train initial random forest model
+
+set.seed(5003)
+
+X_test_rf <- test_data %>% dplyr::select (-"Credit_Score")
+model_rf <- ranger(Credit_Score ~ ., data = train_data, importance = 'impurity')
+
+predictions_rf <- predict(model_rf, data = X_test_rf)
+metrics_rf <- calculate_classification_metrics(predictions_rf$predictions, test_data$Credit_Score)
+```
+
+**Tuned**
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+# codes to do manual grid search using for loop
+
+num_folds <- 2
+folds <- createFolds(train_data$Credit_Score, k = num_folds)
+
+num.trees <- c(300, 500, 700)
+max.depth <- c(0, 10, 15)
+min.node.size <- c(1, 3, 5)
+importance <- c('impurity')
+
+results_df <- data.frame(
+  ntree = integer(),
+  maxdepth = integer(),
+  nodesize = integer(),
+  mean_f1 = numeric(),
+  mean_accuracy = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for(nt in num.trees) {
+  for(md in max.depth) {
+    for(mns in min.node.size) {
+      for (imp in importance) {
+        fold_f1_scores <- c()
+        fold_accuracy <- c()
+
+        for(i in 1:num_folds) {
+          test_indices <- folds[[i]]
+          train_data_fold <- train_data[-test_indices,]
+          test_data_fold <- train_data[test_indices,]
+
+          rf_model <- ranger(
+            Credit_Score ~ .,
+            data = train_data_fold,
+            num.trees = nt,
+            max.depth = md,
+            min.node.size = mns,
+            importance = imp,
+            verbose = FALSE
+          )
+
+          predictions <- predict(rf_model, test_data_fold)$predictions
+
+          if(is.factor(test_data_fold$Credit_Score)) {
+            predictions <- factor(predictions, levels = levels(test_data_fold$Credit_Score))
+          }
+
+          f1 <- calculate_classification_metrics(test_data_fold$Credit_Score, predictions)
+
+          fold_f1_scores <- c(fold_f1_scores, f1[1])
+          fold_accuracy <- c(fold_f1_scores, f1[2])
+        }
+
+        mean_f1 <- mean(fold_f1_scores)
+        mean_accuracy <- mean(fold_accuracy)
+
+        new_row <- data.frame(
+          ntree = nt,
+          maxdepth = md,
+          nodesize = mns,
+          mean_f1 = mean_f1,
+          mean_accuracy = mean_accuracy,
+          stringsAsFactors = FALSE
+        )
+
+        results_df <- rbind(results_df, new_row)
+      }
+    }
+  }
+}
+
+results_df <- results_df[order(results_df$mean_f1, decreasing = TRUE), ]
+
+print(results_df)
+```
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+# train random forest model using best parameters found
+set.seed(5003)
+
+# adding class weight to the model
+class_freq <- table(test_data$Credit_Score)
+class_weights <- 1 / class_freq
+case_weights <- class_weights[test_data$Credit_Score]
+
+tuned_model_rf <- ranger(Credit_Score ~ ., data = train_data, num.tree = 700, max.depth = 0, min.node.size = 1, importance = 'impurity', class.weights = class_weights)
+
+predictions_tuned_rf <- predict(tuned_model_rf, data = X_test_rf)
+metrics_tuned_rf <- calculate_classification_metrics(predictions_tuned_rf$predictions, test_data$Credit_Score)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_confusion_matrix <- function(conf_matrix, title = "Confusion Matrix") {
+
+  conf_df <- as.data.frame(as.table(conf_matrix))
+  names(conf_df) <- c("Actual", "Predicted", "Count")
+  
+  ggplot(conf_df, aes(x = Actual, y = Predicted, fill = Count)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Count), size = 3) +
+    scale_fill_gradient(low = "white", high = "steelblue") +
+    labs(x = "Actual", y = "Predicted", title = title) + 
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 9),
+      axis.title = element_text(size = 9),
+      axis.text = element_text(size = 9)
+    )
+}
+
+conf_matrix_model_rf <- confusionMatrix(predictions_rf$predictions, test_data$Credit_Score)
+conf_matrix_model_rf_tuned <- confusionMatrix(predictions_tuned_rf$predictions, test_data$Credit_Score)
+
+plot_rf <- plot_confusion_matrix(conf_matrix_model_rf, "Confusion Matrix - Initial Random Forest Model")
+plot_rf_tuned <- plot_confusion_matrix(conf_matrix_model_rf_tuned, "Confusion Matrix - Tuned Random Forest Model")
+
+grid.arrange(plot_rf, plot_rf_tuned, ncol = 2, widths = c(12, 12), heights = c(6, 6))
+```
+
+```{r}
+feature_importance <- importance(tuned_model_rf)
+feature_importance <- sort(feature_importance, decreasing = FALSE)
+
+top_5 <- head(feature_importance, 5)
+
+par(mar = c(4, 12, 4, 2))
+
+rf_feature_plot <- barplot(
+  top_5,
+  main = "Top 5 Feature Importance",
+  xlab = "Importance",
+  ylab = "",
+  col = "skyblue",
+  las = 1,  # Make labels horizontal
+  horiz = TRUE,
+  cex.names = 0.7
+)
+rf_feature_plot
+```
+
+
+```{r, cache=TRUE}
+f1_score_rf <- metrics_rf[1]
+f1_score_tuned_rf <- metrics_tuned_rf[1]
+
+accuracy_rf <- metrics_rf[2]
+accuracy_tuned_rf <- metrics_tuned_rf[2]
+
+f1_table_rf <- data.frame(
+  Model = c("Initial RF", "Tuned RF"),
+  Accuracy = c(accuracy_rf, accuracy_tuned_rf),
+  F1_Score = c(f1_score_rf, f1_score_tuned_rf)
+)
+
+kable(f1_table_rf, caption = "Comparison of RF Accuracy and F1-Score")
+```
+
+For the tuned random forest, the model are tuned for num.trees, max.depth and min.node.size, using 5 fold cross validation. The result are :
+
+1. num.trees : 700
+
+2. max.depth : 0 (same as default)
+
+3. min.node.size : 1 (same as default)
+
+The model then trained using best parameter, also class_weight parameter is added, which set to inversely proportional from the class size. The F1-score is slighly increased for the tuned model, and the performance on predicting class label "poor" and "good" are slightly better.
+
+
+## 3.4 XGBoost
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+num_classes <- length(unique(train_data$Credit_Score))
+train_Credit_Score_xgb <- as.numeric(train_data$Credit_Score) - 1
+```
+
+**Baseline**
+
+First, we Initialize the model,then training the XGBoost model with fixed parameters, make predictions and calculating the F1 Score of the base model.
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+train_matrix <- xgb.DMatrix(data = X_train, label=train_Credit_Score_xgb)
+test_matrix <- xgb.DMatrix(data = X_test)
+
+params <- list(
+    objective = "multi:softprob",
+    num_class = num_classes,
+    booster = "gbtree",
+    eval_metric = "mlogloss",
+    eta = 0.3,    # learning rate
+    max_depth = 6 # max depth of trees
+)
+
+model_xgboost <- xgb.train(params = params, data = train_matrix, nrounds = 100)
+
+predictions_xgb<- predict(model_xgboost, test_matrix)
+predicted_classes_xgb <- max.col(matrix(predictions_xgb, byrow = TRUE, ncol = num_classes))
+
+actual_classes <- factor(test_data$Credit_Score, levels = 0:(length(unique(train_data$Credit_Score))))
+
+predicted_classes_xgb <- factor(predicted_classes_xgb, levels = levels(actual_classes))
+f1_xgb_initial <- calculate_classification_metrics(predicted_classes_xgb, as.numeric(test_data$Credit_Score))
+```
+
+Mapping the numeric output back as categorical string of "Poor", "Standard" and "Good". Creating the Confusion Matrix of the base model and plotting the matrix based on data count.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+predictions_xgboost_factor <- factor(predicted_classes_xgb, levels = c("1", "2", "3"), labels = c("Poor", "Standard", "Good"))
+conf_matrix <- confusionMatrix(predictions_xgboost_factor, test_data$Credit_Score)
+# Compute accuracy from the confusion matrix
+base_accuracy <- conf_matrix$overall['Accuracy']
+# Convert confusion matrix to data frame
+conf_df <- as.data.frame(as.table(conf_matrix))
+names(conf_df) <- c("Actual", "Predicted", "Count")
+
+# Plot heatmap using ggplot2
+ggplot(conf_df, aes(x = Actual, y = Predicted, fill = Count)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Count)) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  labs(x = "Actual", y = "Predicted", title = "Confusion Matrix - Base Model XGboost Model")
+```
+
+**Tuned**
+
+Performing Grid search for eta and max depth by using cross validation with 5 folds and saving all the F1 score with each iterations.
+```{r, cache = TRUE, warning=FALSE, message=FALSE}
+# Define a simpler grid of hyperparameters to search
+param_grid <- expand.grid(
+  eta = c(0.1, 0.3, 0.6),             # Reduced the range of learning rates
+  max_depth = c(3, 6, 9),           # Shallower trees
+  stringsAsFactors = FALSE
+)
+
+# List to store CV results
+cv_results <- list()
+
+# Loop over the grid of parameters
+for(i in seq_len(nrow(param_grid))) {
+  params <- list(
+    booster = "gbtree",
+    objective = "multi:softprob",
+    num_class = num_classes,
+    eval_metric = "mlogloss",
+    eta = param_grid$eta[i],
+    max_depth = param_grid$max_depth[i]
+  )
+  
+  # Perform cross-validation
+  cv_model <- xgb.cv(
+    params = params,
+    data = train_matrix,
+    nrounds = 50,
+    nfold = 5,
+    showsd = TRUE,
+    stratified = TRUE,
+    print_every_n = 10,
+    early_stopping_rounds = 20,
+    maximize = FALSE,
+    verbose = 0
+  )
+  
+  # Store CV results
+  cv_results[[i]] <- list(
+    Params = params,
+    Model = cv_model
+  )
+}
+
+# Select the best model (example: based on lowest test mlogloss mean)
+best_model <- cv_results[[which.min(sapply(cv_results, function(x) min(x$Model$evaluation_log$test_mlogloss_mean)))]]
+# Select the best model (example: based on lowest test mlogloss mean)
+best_model <- cv_results[[which.min(sapply(cv_results, function(x) min(x$Model$evaluation_log$test_mlogloss_mean)))]]
+# Assuming you decide to use the best CV model to make predictions directly:
+best_params <- best_model$Params
+final_model <- xgb.train(best_params, train_matrix, nrounds = length(best_model$Model$evaluation_log$test_mlogloss_mean))
+# Make predictions on the test set
+predictions_xgb_final <- predict(final_model, test_matrix)
+predicted_classes_xgb_final <- max.col(matrix(predictions_xgb_final, byrow = TRUE, ncol = num_classes))
+# Convert predictions to factor using the correct levels as previously described
+predicted_classes_xgb_final <- factor(predicted_classes_xgb_final, levels = levels(actual_classes))
+
+f1_xgb_grid <- calculate_classification_metrics(predicted_classes_xgb_final, as.numeric(test_data$Credit_Score))
+```
+
+Creating the Confusion Matrix of the tuned model using the best parameter from the grid search and plotting the matrix based on data count.
+
+```{r, warning=FALSE, message=FALSE}
+predictions_xgboost_factor_final <- factor(predicted_classes_xgb_final, levels = c("1", "2", "3"), labels = c("Poor", "Standard", "Good"))
+conf_matrix <- confusionMatrix(predictions_xgboost_factor_final, test_data$Credit_Score)
+# Compute accuracy from the confusion matrix
+tuned_accuracy <- conf_matrix$overall['Accuracy']
+
+# Print the accuracy
+print(tuned_accuracy)
+# Convert confusion matrix to data frame
+conf_df <- as.data.frame(as.table(conf_matrix))
+names(conf_df) <- c("Actual", "Predicted", "Count")
+
+# Plot heatmap using ggplot2
+ggplot(conf_df, aes(x = Actual, y = Predicted, fill = Count)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Count)) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  labs(x = "Actual", y = "Predicted", title = "Confusion Matrix - Tuning Model XGboost Model")
+```
+
+The final result shows both the accuracy and F1 score shows an increase from the base model to the tuned model.
+
+
+```{r, warning=FALSE, message=FALSE}
+f1_table <- data.frame(
+  model=c("Base XGB","Tuned XGB" ),
+  f1_score=c(f1_xgb_initial,f1_xgb_grid ),
+  accuracy=c(base_accuracy, tuned_accuracy)
+)
+kable(f1_table, caption ="Base vs Tuned Model")
+```
+
+Using the feature importance embedded in the XGBoost model we can show the rank and importance of each features used for the model. A feature importance plot is also visualized where it is shown that the most important features in the dataset is “Outstanding_Debt”.
+```{r, warning=FALSE, message=FALSE}
+# Calculate feature importance
+importance_matrix <- xgb.importance(model = final_model)
+
+# Plot feature importance
+xgb.plot.importance(importance_matrix)
+```
+
+```{r}
+combined_metrics <- rbind(
+  metrics_multinom,
+  metrics_multinom_tuned,
+  metrics_lda,
+  metrics_rf,
+  metrics_tuned_rf,
+  f1_xgb_initial,
+  f1_xgb_grid
+)
+
+combined_metrics_df <- as.data.frame(combined_metrics)
+combined_metrics_df$model <- c("Multinom Base", "Multinom Tuned", "LDA", "RF Base", "Tuned RF", "XGB Base", "XGB Tuned")
+combined_metrics_df <- combined_metrics_df %>%
+  rename(`F1-Score Weighted` = V1)
+
+long_metrics_df <- pivot_longer(combined_metrics_df, cols = -model, names_to = "Metric", values_to = "Value")
+max_accuracy <- max(long_metrics_df$Value[long_metrics_df$Metric == "Accuracy"])
+max_f1_score <- max(long_metrics_df$Value[long_metrics_df$Metric == "F1-Score Weighted"])
+
+ggplot(long_metrics_df, aes(x = model, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  theme_minimal() +
+  labs(title = "Comparison of Accuracy and F1 Score Across Models",
+       x = "Model",
+       y = "Value",
+       fill = "Metric") +
+  scale_fill_manual(values = c("Accuracy" = "steelblue", "F1-Score Weighted" = "gray")) +
+  geom_hline(aes(yintercept = max_accuracy), color = "steelblue", size = 0.5, linetype = "longdash") +
+  geom_hline(aes(yintercept = max_f1_score), color = "gray", size = 0.5, linetype = "dotted") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+# 4. Results 
+INGAT UNTUK HAPUS INI: 5pts - clearly described methods used and the results obtained.
+INGAT UNTUK HAPUS INI: 4pts - clearly described the model comparison and the final selected model (if any) based on the proposed evaluation strategies. Notice, you need to correctly evaluate the different classification models and consider more than one performance metrics.
+
+
+The table and plot above show the comparison of all four models' performances. It can be seen that the multinomial and LDA models perform similarly, while XGBoost and Random Forest outperform them both. Random Forest has the best performance with the highest accuracy and F1-Score.
+
+One of the reasons for this is that the tree-based method excels in making predictions of tabular data since it can create a nonlinear boundary more easily than the multinomial and LDA models, hence the better performance the model results. We can see this more clearly in Section 3.2, where the LDA splits the data linearly.
+
+A high accuracy score indicates a strong overall ability of the model to correctly classify clients into their respective credit score categories (Good, Standard, Poor). A high F1 Score signifies a well-balanced model in terms of precision (finding true good credit scores) and recall (identifying all deserving good credit scores) across all classes (Good, Standard, Poor). This shows that the model can provide good predictions for each class without sacrificing the quality of predictions for other classes.
+
+Another thing that can be compared is that Multinom and LDA were unable to use the full data without reducing the dimensionality of the data first. On the other hand, this was not needed for both Random Forest and XGBoost models. This ability to process the full data is an advantage for Random Forest and XGBoost since the feature importance can be exported and it can be interpreted compared to the other two models. 
+
+The final selected model for the Credit Score classification data is <span style="color:#dc4c14">**Random Forest**</span>
+
+# 5. Discussion and conclusion 
+INGAT UNTUK HAPUS INI: 3pts Discussion of potential shortcomings or issues associated with the development process and/or the final results with reference to both. Identification of future work or improvement in both areas. Conclusion adequately summarises the project and identification of future work.
+
+
+# INGAT UNTUK HAPUS INI:Presentation 
+INGAT UNTUK HAPUS INI: 2pts The report contains a similar structure as described in slide 16 from the project description.
+INGAT UNTUK HAPUS INI: 3pts All figures and tables should be captioned. Label the axes and headings for all figures. Use legends if applicable. All numeric results should have an appropriate accuracy level (e.g. less than or equal to 2.d.p).
+INGAT UNTUK HAPUS INI: 2pts Effective use of figures and tables.
