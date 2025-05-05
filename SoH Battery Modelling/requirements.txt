@@ -1,0 +1,4 @@
+jupyterlab==4.3.6
+pandas==2.2.3
+scipy==1.15.2
+tqdm==4.67.1
